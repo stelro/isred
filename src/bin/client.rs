@@ -1,41 +1,47 @@
 use std::net::{TcpStream};
 
 mod tcp_common;
+use tcp_common::{K_MAX_MSG, K_HEADER_SIZE, read_full, write_all};
 
 fn query(stream: &mut TcpStream, text: &str) -> std::io::Result<()> {
 
     let len = text.len();
-    if len > tcp_common::K_MAX_MSG {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Text too long"));
+    if len > K_MAX_MSG {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, 
+                "Message text is too long"));
     }
 
-    let mut wbuf = [0u8; 4 + tcp_common::K_MAX_MSG];
-    wbuf[..4].copy_from_slice(&(len as u32).to_be_bytes());
-    wbuf[4..][..len].copy_from_slice(text.as_bytes());
+    let mut wbuf = [0u8;K_HEADER_SIZE + K_MAX_MSG];
+    wbuf[..K_HEADER_SIZE].copy_from_slice(&(len as u32).to_be_bytes());
+    wbuf[K_HEADER_SIZE..][..len].copy_from_slice(text.as_bytes());
 
-    tcp_common::write_all(stream, &wbuf[..4 + len])?;   
+    write_all(stream, &wbuf[..K_HEADER_SIZE + len])?;   
 
-    // 4 bytes header
-    let mut rbuf = [0u8; 4 + tcp_common::K_MAX_MSG + 1];
-    // Request header
-    tcp_common::read_full(stream, &mut rbuf[..4])?;
-    
-    let len = u32::from_be_bytes(rbuf[..4].try_into().unwrap()) as usize;
-    
-    println!("Received length: {}", len);
+    // Read servers response
+    // 4 Bytes for the header
+    let mut rbuf = [0u8; K_HEADER_SIZE + K_MAX_MSG + 1];
+    // Request the header first of the message
+    read_full(stream, &mut rbuf[..K_HEADER_SIZE])?;
+    // Now parse the header and grab the size of the message
+    let len = u32::from_be_bytes(rbuf[..K_HEADER_SIZE].try_into().unwrap()) as usize;
+    println!("The message size according to header is {} bytes.", len);
 
-    if len  > tcp_common::K_MAX_MSG {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Reply too long"));
+    if len > K_MAX_MSG {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, 
+                "Message length is too long."));
     }
 
-    // Request body
-    tcp_common::read_full(stream, &mut rbuf[4..4 + len])?;
+    if len == 0 {
+        return Ok(());
+    }
 
-    // do something
-    rbuf[4 + len] = b'\0';
+    // Now request the body of the message
+    read_full(stream, &mut rbuf[K_HEADER_SIZE..K_HEADER_SIZE + len])?;
+    rbuf[K_HEADER_SIZE + len] = b'\0';
 
-    println!("Server says: {}", std::str::from_utf8(&rbuf[4..4 + len]).unwrap());
-    
+    println!("Message from the Server: {}", 
+        std::str::from_utf8(&rbuf[K_HEADER_SIZE..K_HEADER_SIZE + len]).unwrap());
+
     Ok(())
 }
  
@@ -43,10 +49,15 @@ fn main() -> std::io::Result<()> {
     
     if let Ok(mut stream) = TcpStream::connect("127.0.0.1:1234") {
         println!("Connected to the server!");
+
         query(&mut stream, "ACK from client 1")?;
         query(&mut stream, "ACK from client 2")?;
         query(&mut stream, "ACK from client 3")?;
-        drop(stream);
+        query(&mut stream, "ACK from client 4")?;
+        query(&mut stream, "Some other random bigger message")?;
+
+        stream.shutdown(std::net::Shutdown::Both)?;
+
     } else {
         println!("Couldn't connect to server...");
     }

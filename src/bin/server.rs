@@ -1,45 +1,45 @@
 use std::net::{TcpListener, TcpStream};
 
 mod tcp_common;
+use tcp_common::{K_MAX_MSG, K_HEADER_SIZE, read_full, write_all};
 
-fn one_request(stream: &mut TcpStream) -> std::io::Result<()> {
+fn handle_request(stream: &mut TcpStream) -> std::io::Result<()> {
 
-    // 4 bytes header
-    let mut rbuf = [0u8; 4 + tcp_common::K_MAX_MSG + 1];
-    // Request header
-    tcp_common::read_full(stream, &mut rbuf[..4])?;
-    
-    let len = u32::from_be_bytes(rbuf[..4].try_into().unwrap()) as usize;
-    
-    println!("Received length: {}", len);
+    // 4 Bytes for the header
+    let mut rbuf = [0u8; K_HEADER_SIZE + K_MAX_MSG + 1];
+    // Request the header first of the message
+    read_full(stream, &mut rbuf[..K_HEADER_SIZE])?;
+    // Now parse the header and grab the size of the message
+    let len = u32::from_be_bytes(rbuf[..K_HEADER_SIZE].try_into().unwrap()) as usize;
+    println!("The message size according to header is {} bytes.", len);
 
-    if len > tcp_common::K_MAX_MSG {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Length is too long."));
+    if len > K_MAX_MSG {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, 
+                "Message length is too long."));
     }
 
     if len == 0 {
         return Ok(());
     }
 
-    // Request body
-    tcp_common::read_full(stream, &mut rbuf[4..4 + len])?;
+    // Now request the body of the message
+    read_full(stream, &mut rbuf[K_HEADER_SIZE..K_HEADER_SIZE + len])?;
+    rbuf[K_HEADER_SIZE + len] = b'\0';
 
-    // do something
-    rbuf[4 + len] = b'\0';
+    println!("Message from the client: {}", 
+        std::str::from_utf8(&rbuf[K_HEADER_SIZE..K_HEADER_SIZE + len]).unwrap());
 
-    println!("Client says: {}", std::str::from_utf8(&rbuf[4..4 + len]).unwrap());
+    // Send something back to client
+    const REPLY_TO_CLIENT: &[u8] = b"ACK from Server!";
+    let len = REPLY_TO_CLIENT.len();
+    let mut wbuf = [0u8;K_HEADER_SIZE + REPLY_TO_CLIENT.len()];
 
-    // Reply using the same protocol
-    const REPLY: &[u8] = b"ACK from server!";
-    let len = REPLY.len();
-    let mut wbuf = [0u8; 4 + REPLY.len()];
-    
-    wbuf[..4].copy_from_slice(&(len as u32).to_be_bytes());
-    wbuf[4..][..len].copy_from_slice(REPLY);
-    
-    tcp_common::write_all(stream, &wbuf[..4 + len])?;
+    wbuf[..K_HEADER_SIZE].copy_from_slice(&(len as u32).to_be_bytes());
+    wbuf[K_HEADER_SIZE..][..len].copy_from_slice(REPLY_TO_CLIENT);
+    write_all(stream, &wbuf[..K_HEADER_SIZE + len])?;   
 
     Ok(())
+
 }
 
 fn main() -> std::io::Result<()> {
@@ -51,7 +51,10 @@ fn main() -> std::io::Result<()> {
     for stream_result in listener.incoming() {
         match stream_result {
             Ok(mut stream) => {
-                one_request(&mut stream)?;
+                loop {
+                    println!("Accepting new connection...");
+                    handle_request(&mut stream)?;
+                }
             }
             Err(e) => {
                 eprintln!("Error accepting connection: {}", e);

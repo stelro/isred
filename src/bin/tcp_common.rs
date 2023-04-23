@@ -2,19 +2,19 @@ use std::net::{TcpStream};
 use std::io::{Read, Write};
 
 pub const K_MAX_MSG: usize = 4096;
+pub const K_HEADER_SIZE: usize = 4;
 
 pub fn read_full(stream: &mut TcpStream, buffer: &mut [u8]) -> std::io::Result<()> {
 
-    let mut total_read = 0;
+    let mut bytes_read = 0;
     
-    while total_read < buffer.len() {
-        let read = stream.read(&mut buffer[total_read..])?;
-        println!("read bytes: {}", read);
+    while bytes_read < buffer.len() {
+        let read = stream.read(&mut buffer[bytes_read..])?;
         if read == 0 {
             return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, 
                     "Unexpected EOF"));
         }
-        total_read += read;
+        bytes_read += read;
     }
 
     Ok(())
@@ -22,11 +22,10 @@ pub fn read_full(stream: &mut TcpStream, buffer: &mut [u8]) -> std::io::Result<(
 
 pub fn write_all(stream: &mut TcpStream, buffer: &[u8]) -> std::io::Result<()> {
 
-    let mut bytes_written = 0;
-
-    while bytes_written < buffer.len() {
-        let written = stream.write(&buffer[bytes_written..buffer.len()])?;
-        bytes_written += written;
+    let mut bytes_wrote = 0;
+    while bytes_wrote < buffer.len() {
+        let wrote = stream.write(&buffer[bytes_wrote..])?;
+        bytes_wrote += wrote;
     }
 
     Ok(())
